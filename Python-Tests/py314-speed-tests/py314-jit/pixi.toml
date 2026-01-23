@@ -1,0 +1,11 @@
+[workspace]
+channels = ["conda-forge"]
+name = "py314-jit"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python-jit = "3.14.*"
+numba = ">=0.63.1,<0.64"

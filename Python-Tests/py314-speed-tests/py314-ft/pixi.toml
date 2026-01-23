@@ -1,0 +1,10 @@
+[workspace]
+channels = ["conda-forge"]
+name = "py314-ft"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python-freethreading = "3.14.*"
