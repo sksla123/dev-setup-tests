@@ -1,0 +1,6 @@
+print("Hello, world!")
+print('-'*40)
+print("안녕, 세상아!")
+print('-'*40)
+print("Multi language input-output test(echo)")
+print(input("Input 'hello' in Korean: "))
