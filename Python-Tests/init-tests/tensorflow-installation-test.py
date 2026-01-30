@@ -1,125 +1,164 @@
-import tensorflow as tf
+import time
 import sys
-import platform
 import os
-import argparse
+import subprocess
+from numba import njit
 
-# TensorFlow 로그 레벨 조정 (불필요한 정보 숨기기)
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# ----------------------------------------------------------------
+# 설정
+# ----------------------------------------------------------------
+N = 500_000_000
 
-def print_header(title):
-    print("\n" + "="*60)
-    print(f" {title} ")
-    print("="*60)
+# ----------------------------------------------------------------
+# 연산 함수 정의
+# ----------------------------------------------------------------
+def compute_python_loop():
+    s = 0
+    for i in range(N):
+        s += i * i
+    return s
 
-def get_env_info():
-    print_header("시스템 및 환경 정보")
-    print(f"운영체제       : {platform.system()} {platform.release()}")
-    print(f"Python 버전    : {sys.version.split()[0]}")
-    print(f"TensorFlow 버전: {tf.__version__}")
+@njit
+def compute_numba():
+    s = 0
+    for i in range(N):
+        s += i * i
+    return s
 
-    try:
-        build_info = tf.sysconfig.get_build_info()
-        if 'cuda_version' in build_info:
-            print(f"빌드된 CUDA 버전 : {build_info['cuda_version']}")
-        if 'cudnn_version' in build_info:
-            print(f"빌드된 cuDNN 버전: {build_info['cudnn_version']}")
-        if 'is_cuda_build' in build_info:
-            print(f"CUDA 빌드 여부   : {build_info['is_cuda_build']}")
-    except Exception:
-        print("빌드 세부 정보를 가져올 수 없습니다.")
+def require_jit_build_or_exit():
+    """
+    CPython experimental JIT 빌드가 아니면 경고 출력 후 종료
+    """
+    if not hasattr(sys, "_is_jit_enabled"):
+        print("=" * 70, file=sys.stderr)
+        print("ERROR: This Python interpreter is NOT built with CPython JIT support.", file=sys.stderr)
+        print("       (sys._is_jit_enabled is missing)", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("This benchmark is meaningless without a JIT-enabled CPython build.", file=sys.stderr)
+        print("Please rebuild CPython with:", file=sys.stderr)
+        print("  ./configure --enable-experimental-jit", file=sys.stderr)
+        print("=" * 70, file=sys.stderr)
+        sys.exit(1)
 
-def check_tensorrt():
-    """TensorRT 설치 여부 및 버전 확인"""
-    print_header("TensorRT 가속 라이브러리 정보")
-    try:
-        import tensorrt
-        print(f"TensorRT 버전      : {tensorrt.__version__}")
+# ----------------------------------------------------------------
+# 워커(Worker): 실제 벤치마크 수행
+# ----------------------------------------------------------------
+def run_benchmark_worker():
+    # 현재 JIT 활성화 상태 확인
+    # 3.13+ JIT 여부 확인
+    is_jit = False
+    if hasattr(sys, "_is_jit_enabled"):
+        is_jit = sys._is_jit_enabled()
+    
+    # 실행 로그는 stderr로 출력해야 캡처되지 않고 화면에 보입니다.
+    print(f"Running python path: {sys.executable}", file=sys.stderr)
+    
+    mode_name = "Python (CPython JIT Enabled)" if is_jit else "Standard Python (Interpreted)"
+    
+    print(f"[{mode_name}] 시작 (PID: {os.getpid()})...", file=sys.stderr)
+    
+    # 1. Python Loop
+    start = time.perf_counter()
+    compute_python_loop()
+    elapsed_python = time.perf_counter() - start
+    
+    # 2. Numba (Warm-up 포함)
+    compute_numba() 
+    start_numba = time.perf_counter()
+    compute_numba()
+    elapsed_numba = time.perf_counter() - start_numba
+    
+    # 결과 데이터는 stdout으로 출력 (Orchestrator가 파싱)
+    print(f"RESULT|{mode_name}|{elapsed_python:.4f}|{elapsed_numba:.6f}")
+
+# ----------------------------------------------------------------
+# 오케스트레이터(Orchestrator): 하위 프로세스 관리
+# ----------------------------------------------------------------
+def run_orchestrator():
+    require_jit_build_or_exit()
+
+    print("=" * 70)
+    print(f"Benchmarks Orchestrator (Python {sys.version.split()[0]})")
+    print("=" * 70)
+
+    results = []
+
+    # 시나리오 정의: (표시 이름, 실행 플래그, 환경 변수)
+    scenarios = [
+        ("Interpreted", [], {}),                                 # JIT Off
+        ("JIT Enabled", ["-X", "jit"], {"PYTHON_JIT": "1"})      # JIT On (플래그 + 환경변수)
+    ]
+
+    current_script = os.path.abspath(__file__)
+
+    for label, flags, env_vars in scenarios:
+        cmd = [sys.executable] + flags + [current_script, "--worker"]
         
-        # 상세 정보 확인 (Logger 초기화 필요)
-        logger = tensorrt.Logger(tensorrt.Logger.INFO)
-        print(f"TensorRT 로거 상태 : 정상 (INFO 레벨 활성)")
-        return True
-    except ImportError:
-        print("[!] TensorRT 패키지를 찾을 수 없습니다. (import tensorrt 실패)")
-        return False
-    except Exception as e:
-        print(f"[!] TensorRT 초기화 중 에러 발생: {e}")
-        return False
+        # 부모 환경 변수 복사 후 JIT 설정 추가
+        current_env = os.environ.copy()
+        current_env.update(env_vars)
+        
+        print(f"Running: {label} Mode...", end=" ", flush=True)
+        try:
+            # env 인자를 통해 환경 변수 주입!
+            result = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                check=True, 
+                env=current_env
+            )
 
-def test_tensor_operation(device_name):
-    print(f"\n[테스트 대상 장치: {device_name}]")
-    try:
-        with tf.device(device_name):
-            size = 2000
-            print(f"  - 텐서 생성 및 이동...", end="")
-            x = tf.random.uniform((size, size))
-            y = tf.random.uniform((size, size))
-            print(" OK")
+            # 캡처된 내용을 화면에도 보여줌 (확인용)
+            print("\n", "-" * 70)
+            print(f"[{label}] Worker Output (stderr/stdout merged logic handled via pipe)\n")
+            # stderr로 보낸 건 이미 화면에 나왔을 것이고, 여기선 stdout(결과)만 찍힘
+            print(result.stdout.strip())
+            print("-" * 70)
+            
+            # 자식 프로세스 출력 파싱
+            parsed = False
+            for line in result.stdout.splitlines():
+                if line.startswith("RESULT|"):
+                    parts = line.split("|")
+                    mode = parts[1]
+                    t_py = float(parts[2])
+                    t_nb = float(parts[3])
+                    results.append((mode, t_py, t_nb))
+                    parsed = True
+            
+            if parsed:
+                print("Done.")
+            else:
+                print("Failed to parse result.")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"Error!\n{e.stderr}")
 
-            print(f"  - 행렬 곱셈 연산 (Matrix Multiplication)...", end="")
-            z = tf.matmul(x, y)
-            _ = z.numpy() 
-            print(" PASS")
-            return True
-    except Exception as e:
-        print(" FAILED")
-        print(f"  [!] 에러 발생: {e}")
-        return False
-
-def run_diagnostics(force_cpu=False):
-    get_env_info()
+    # 최종 종합 리포트 출력
+    print("\n" + "=" * 70)
+    print(f"{'Mode':<30} | {'Standard Python (s)':<15} | {'Numba (s)':<15} | {'Speedup'}")
+    print("-" * 70)
     
-    # TensorRT 체크 추가
-    check_tensorrt()
+    base_time = None
 
-    print_header("물리적 장치(Physical Devices) 감지")
-    
-    physical_devices = tf.config.list_physical_devices()
-    gpus = tf.config.list_physical_devices('GPU')
-    cpus = tf.config.list_physical_devices('CPU')
-    
-    is_mac_metal = (platform.system() == 'Darwin' and len(gpus) > 0)
-    
-    print(f"전체 감지된 장치 수: {len(physical_devices)}")
-    print(f"  - CPU: {len(cpus)}")
-    print(f"  - GPU: {len(gpus)} {'(Metal/MPS 포함)' if is_mac_metal else ''}")
+    for mode, t_py, t_nb in results:
+        speedup_str = f"{t_py / t_nb:,.1f}x" if t_nb > 0 else "N/A"
+        print(f"{mode:<30} | {t_py:<15.4f} | {t_nb:<15.6f} | {speedup_str}")
+        
+        if "Interpreted" in mode:
+            base_time = t_py
+        elif base_time:
+            jit_improvement = (base_time - t_py) / base_time * 100
+            print(f"   L-> CPython JIT Improvement over Interpreted: {jit_improvement:.2f}%")
 
-    # 1. GPU 테스트 수행 여부 결정
-    if gpus:
-        print_header("GPU 가속기 테스트")
-        for i, device in enumerate(gpus):
-            target_device = f"/device:GPU:{i}"
-            print(f"장치 ID: {device.name}")
-            try:
-                details = tf.config.experimental.get_device_details(device)
-                if details:
-                    print(f"  - 상세 정보: {details}")
-            except:
-                pass
-            test_tensor_operation(target_device)
-    else:
-        print("\n[!] 감지된 GPU가 없습니다.")
+    print("=" * 70)
 
-    # 2. CPU 테스트 수행 여부 결정 (GPU가 없거나 --cpu 플래그가 있을 때)
-    if not gpus or force_cpu:
-        title = "CPU 테스트 (GPU 미감지)" if not gpus else "CPU 테스트 (명시적 요청)"
-        print_header(title)
-        test_tensor_operation("/device:CPU:0")
-        print('\n' + "="*60)
-    else:
-        print("\n" + "="*60)
-        print(" GPU가 정상 감지되어 CPU 테스트를 건너뜀 (TensorRT 추론 준비 완료)")
-        print(" (CPU 테스트를 원하시면 --cpu 인자를 사용하세요.)")
-        print("="*60)
-
+# ----------------------------------------------------------------
+# 진입점
+# ----------------------------------------------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TensorFlow & TensorRT Installation Diagnostic Tool")
-    parser.add_argument(
-        '--cpu', 
-        action='store_true', 
-        help='GPU가 감지되더라도 CPU 테스트를 강제로 수행합니다.'
-    )
-    
-    args = parser.parse_args()
-    run_diagnostics(force_cpu=args.cpu)
+    if "--worker" in sys.argv:
+        run_benchmark_worker()
+    else:
+        run_orchestrator()
