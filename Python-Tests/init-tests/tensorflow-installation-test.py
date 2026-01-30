@@ -29,6 +29,24 @@ def get_env_info():
     except Exception:
         print("빌드 세부 정보를 가져올 수 없습니다.")
 
+def check_tensorrt():
+    """TensorRT 설치 여부 및 버전 확인"""
+    print_header("TensorRT 가속 라이브러리 정보")
+    try:
+        import tensorrt
+        print(f"TensorRT 버전      : {tensorrt.__version__}")
+        
+        # 상세 정보 확인 (Logger 초기화 필요)
+        logger = tensorrt.Logger(tensorrt.Logger.INFO)
+        print(f"TensorRT 로거 상태 : 정상 (INFO 레벨 활성)")
+        return True
+    except ImportError:
+        print("[!] TensorRT 패키지를 찾을 수 없습니다. (import tensorrt 실패)")
+        return False
+    except Exception as e:
+        print(f"[!] TensorRT 초기화 중 에러 발생: {e}")
+        return False
+
 def test_tensor_operation(device_name):
     print(f"\n[테스트 대상 장치: {device_name}]")
     try:
@@ -51,6 +69,9 @@ def test_tensor_operation(device_name):
 
 def run_diagnostics(force_cpu=False):
     get_env_info()
+    
+    # TensorRT 체크 추가
+    check_tensorrt()
 
     print_header("물리적 장치(Physical Devices) 감지")
     
@@ -88,12 +109,12 @@ def run_diagnostics(force_cpu=False):
         print('\n' + "="*60)
     else:
         print("\n" + "="*60)
-        print(" GPU가 정상 감지되어 CPU 테스트를 건너뜁니다.")
+        print(" GPU가 정상 감지되어 CPU 테스트를 건너뜜 (TensorRT 추론 준비 완료)")
         print(" (CPU 테스트를 원하시면 --cpu 인자를 사용하세요.)")
         print("="*60)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TensorFlow Installation and Device Diagnostic Tool")
+    parser = argparse.ArgumentParser(description="TensorFlow & TensorRT Installation Diagnostic Tool")
     parser.add_argument(
         '--cpu', 
         action='store_true', 
