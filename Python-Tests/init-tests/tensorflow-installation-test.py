@@ -85,6 +85,7 @@ def run_diagnostics(force_cpu=False):
         title = "CPU 테스트 (GPU 미감지)" if not gpus else "CPU 테스트 (명시적 요청)"
         print_header(title)
         test_tensor_operation("/device:CPU:0")
+        print('\n' + "="*60)
     else:
         print("\n" + "="*60)
         print(" GPU가 정상 감지되어 CPU 테스트를 건너뜁니다.")
