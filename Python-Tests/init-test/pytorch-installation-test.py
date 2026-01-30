@@ -126,8 +126,8 @@ def run_full_diagnostic():
         check_cpu()
     else:
         print("\n" + "="*60)
-        print(" [참고] 가속기(GPU/MPS) 테스트가 완료되었습니다.")
-        print(" CPU 테스트는 생략합니다 (필요 시 코드 수정).")
+        print(" 가속기(GPU/MPS) 테스트가 완료되었습니다.")
+        print(" CPU 테스트는 생략합니다.")
         print("="*60)
 
 if __name__ == "__main__":

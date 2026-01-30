@@ -114,7 +114,7 @@ def run_diagnostics():
         test_tensor_operation("/device:CPU:0")
     else:
         print("\n" + "="*60)
-        print(" [참고] GPU 테스트가 완료되었습니다.")
+        print(" GPU 테스트가 완료되었습니다.")
         print(" CPU 테스트는 생략합니다.")
         print("="*60)
 
