@@ -109,7 +109,7 @@ def run_diagnostics(force_cpu=False):
         print('\n' + "="*60)
     else:
         print("\n" + "="*60)
-        print(" GPU가 정상 감지되어 CPU 테스트를 건너뜜 (TensorRT 추론 준비 완료)")
+        print(" GPU가 정상 감지되어 CPU 테스트를 건너뜀 (TensorRT 추론 준비 완료)")
         print(" (CPU 테스트를 원하시면 --cpu 인자를 사용하세요.)")
         print("="*60)
 
